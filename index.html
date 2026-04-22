@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>我的雲端 3D 檢視器</title>
+    <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"></script>
+    <style>
+        body { margin: 0; font-family: sans-serif; }
+        model-viewer { width: 100%; height: 90vh; background-color: #f0f0f0; }
+        .controls { padding: 10px; text-align: center; }
+        input { width: 70%; padding: 8px; }
+    </style>
+</head>
+<body>
+
+    <div class="controls">
+        <input type="text" id="urlInput" placeholder="請貼上 .glb 或 .gltf 的雲端網址">
+        <button onclick="loadModel()">載入模型</button>
+    </div>
+
+    <model-viewer id="viewer" src="" 
+                  ar ar-modes="webxr scene-viewer quick-look" 
+                  camera-controls poster="poster.webp" 
+                  shadow-intensity="1" auto-rotate>
+    </model-viewer>
+
+    <script>
+        function loadModel() {
+            const url = document.getElementById('urlInput').value;
+            if(url) {
+                document.getElementById('viewer').src = url;
+            } else {
+                alert("請輸入有效的網址！");
+            }
+        }
+    </script>
+</body>
+</html>
