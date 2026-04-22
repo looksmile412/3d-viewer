@@ -3,16 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D Viewer - Auto Load</title>
+    <title>3D Viewer - Performance Plus</title>
     <style>
-        body { margin: 0; background: #1a1a1a; color: white; font-family: sans-serif; overflow: hidden; }
-        #canvas-container { width: 100vw; height: 100vh; }
-        .ui-panel { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); 
-                    background: rgba(30, 30, 30, 0.8); padding: 10px 20px; border-radius: 30px; 
-                    display: flex; align-items: center; z-index: 100; border: 1px solid #444; }
-        input { border: none; background: transparent; color: #fff; padding: 5px; outline: none; width: 200px; }
-        button { background: #007bff; color: white; border: none; border-radius: 20px; padding: 5px 15px; cursor: pointer; margin-left: 10px; }
-        #status { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); font-size: 14px; color: #00ffcc; text-shadow: 1px 1px 2px #000; }
+        body { margin: 0; background: #2a2a2a; color: white; font-family: sans-serif; overflow: hidden; }
+        #canvas-container { width: 100vw; height: 100vh; touch-action: none; }
+        .ui-panel { position: absolute; top: 15px; left: 50%; transform: translateX(-50%); 
+                    background: rgba(45, 45, 45, 0.9); padding: 8px 15px; border-radius: 25px; 
+                    display: flex; align-items: center; z-index: 100; border: 1px solid #666; box-shadow: 0 4px 15px rgba(0,0,0,0.3); }
+        input { border: none; background: transparent; color: #fff; padding: 5px; outline: none; width: 150px; font-size: 14px; }
+        button { background: #007bff; color: white; border: none; border-radius: 18px; padding: 6px 15px; cursor: pointer; margin-left: 10px; font-weight: bold; }
+        #status { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); font-size: 13px; color: #00ffcc; text-shadow: 1px 1px 2px #000; pointer-events: none; }
     </style>
 </head>
 <body>
@@ -38,24 +38,39 @@
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
         import { Rhino3dmLoader } from 'three/addons/loaders/3DMloader.js';
 
-        let scene, camera, renderer, controls, loader;
+        let scene, camera, renderer, controls, loader, mainLight;
 
         function init() {
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x1a1a1a);
-            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 2000);
-            camera.position.set(100, 100, 100);
+            // 稍微調亮背景色，讓視覺更通透
+            scene.background = new THREE.Color(0x333333);
 
-            renderer = new THREE.WebGLRenderer({ antialias: true });
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 3000);
+            camera.position.set(150, 150, 150);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // 限制像素比以提升效能
+            renderer.outputColorSpace = THREE.SRGBColorSpace; // 讓色彩更鮮艷
             document.getElementById('canvas-container').appendChild(renderer.domElement);
 
             controls = new OrbitControls(camera, renderer.domElement);
-            scene.add(new THREE.AmbientLight(0xffffff, 0.8));
-            const dirLight = new THREE.DirectionalLight(0xffffff, 1);
-            dirLight.position.set(100, 100, 100);
-            scene.add(dirLight);
+            controls.enableDamping = true; // 啟用阻尼（慣性）
+            controls.dampingFactor = 0.05; // 調整這個值可以讓轉動更順滑
+            controls.rotateSpeed = 0.8;
+
+            // --- 強力燈光系統 ---
+            const ambientLight = new THREE.AmbientLight(0xffffff, 1.5); // 環境光調強
+            scene.add(ambientLight);
+
+            mainLight = new THREE.DirectionalLight(0xffffff, 2.0); // 主燈光調強
+            mainLight.position.set(1, 1, 1).normalize();
+            scene.add(mainLight);
+
+            // 加入隨相機移動的燈，保證正面永遠是亮的
+            const cameraLight = new THREE.PointLight(0xffffff, 1.0);
+            camera.add(cameraLight);
+            scene.add(camera);
 
             loader = new Rhino3dmLoader();
             loader.setLibraryPath('https://unpkg.com/rhino3dm@8.0.1/');
@@ -63,7 +78,6 @@
             window.addEventListener('resize', onWindowResize);
             animate();
 
-            // --- 自動載入邏輯 ---
             const urlParams = new URLSearchParams(window.location.search);
             const modelName = urlParams.get('model');
             if (modelName) {
@@ -82,22 +96,38 @@
             if (url.includes('dropbox.com')) url = url.replace('dl=0', 'dl=1');
             if (!url.startsWith('http')) url = './' + url;
 
-            status.innerText = "正在載入模型...";
+            status.innerText = "正在優化並載入模型...";
+            
             loader.load(url, function(object) {
-                scene.children = scene.children.filter(c => c.type === 'AmbientLight' || c.type === 'DirectionalLight');
-                object.rotation.x = -Math.PI / 2;
+                // 清理舊場景，保留基本燈光
+                scene.children = scene.children.filter(c => c instanceof THREE.Light || c instanceof THREE.Camera);
+                
+                object.rotation.x = -Math.PI / 2; // 修正 Rhino 座標系
+                
+                // 遍歷模型，確保所有材質都受光且顏色鮮明
+                object.traverse(child => {
+                    if (child.isMesh) {
+                        child.material.side = THREE.DoubleSide; // 雙面渲染，避免破面
+                        if (child.material.color) child.material.color.convertSRGBToLinear();
+                    }
+                });
+
                 scene.add(object);
                 status.innerText = "載入成功！";
                 
+                // 自動對焦
                 const box = new THREE.Box3().setFromObject(object);
                 const size = box.getSize(new THREE.Vector3()).length();
                 const center = box.getCenter(new THREE.Vector3());
                 controls.target.copy(center);
-                camera.position.set(center.x + size, center.y + size, center.z + size);
+                camera.position.set(center.x + size * 0.8, center.y + size * 0.8, center.z + size * 0.8);
                 controls.update();
             }, 
-            (p) => { status.innerText = `下載中: ${Math.round(p.loaded/p.total*100)}%`; },
-            (e) => { status.innerText = "❌ 載入失敗，請檢查檔案是否存在"; }
+            (p) => { 
+                const percent = p.total > 0 ? Math.round(p.loaded/p.total*100) : (p.loaded / 1024 / 1024).toFixed(1);
+                status.innerText = `下載中: ${percent}${p.total > 0 ? '%' : ' MB'}`; 
+            },
+            (e) => { status.innerText = "❌ 載入失敗，請確認檔案與網路狀態"; }
             );
         }
 
@@ -109,7 +139,7 @@
 
         function animate() {
             requestAnimationFrame(animate);
-            controls.update();
+            controls.update(); // 這是順暢轉動的關鍵
             renderer.render(scene, camera);
         }
 
