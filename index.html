@@ -3,29 +3,25 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>我的 3D 雲端檢視器 (Rhino 專用)</title>
+    <title>3D Viewer - Auto Load</title>
     <style>
-        body { margin: 0; background: #1a1a1a; color: white; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
+        body { margin: 0; background: #1a1a1a; color: white; font-family: sans-serif; overflow: hidden; }
         #canvas-container { width: 100vw; height: 100vh; }
         .ui-panel { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); 
-                    background: rgba(30, 30, 30, 0.9); padding: 15px 25px; border-radius: 12px; 
-                    box-shadow: 0 8px 32px rgba(0,0,0,0.5); text-align: center; width: 85%; max-width: 500px; z-index: 100; border: 1px solid #444; }
-        input { width: 70%; padding: 10px; border: 1px solid #555; background: #000; color: #fff; border-radius: 6px; outline: none; }
-        button { padding: 10px 20px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 6px; font-weight: bold; margin-left: 5px; transition: 0.3s; }
-        button:hover { background: #0056b3; }
-        #status { font-size: 13px; margin-top: 10px; color: #00ffcc; font-weight: 500; min-height: 18px; }
-        .hint { font-size: 11px; color: #888; margin-top: 8px; }
+                    background: rgba(30, 30, 30, 0.8); padding: 10px 20px; border-radius: 30px; 
+                    display: flex; align-items: center; z-index: 100; border: 1px solid #444; }
+        input { border: none; background: transparent; color: #fff; padding: 5px; outline: none; width: 200px; }
+        button { background: #007bff; color: white; border: none; border-radius: 20px; padding: 5px 15px; cursor: pointer; margin-left: 10px; }
+        #status { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); font-size: 14px; color: #00ffcc; text-shadow: 1px 1px 2px #000; }
     </style>
 </head>
 <body>
 
     <div class="ui-panel">
-        <input type="text" id="urlInput" placeholder="輸入檔名 (如: ajx.3dm) 或 雲端網址">
-        <button onclick="loadModel()">讀取</button>
-        <div id="status">準備就緒</div>
-        <div class="hint">支援 .3dm (Rhino) 檔案 | 手指/滑鼠可旋轉縮放</div>
+        <input type="text" id="urlInput" placeholder="輸入檔名或網址...">
+        <button onclick="loadModelFromInput()">讀取</button>
     </div>
-
+    <div id="status">準備就緒</div>
     <div id="canvas-container"></div>
 
     <script type="importmap">
@@ -44,13 +40,11 @@
 
         let scene, camera, renderer, controls, loader;
 
-        // 初始化場景
         function init() {
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x1a1a1a);
-
             camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 2000);
-            camera.position.set(50, 50, 50);
+            camera.position.set(100, 100, 100);
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
@@ -58,74 +52,53 @@
             document.getElementById('canvas-container').appendChild(renderer.domElement);
 
             controls = new OrbitControls(camera, renderer.domElement);
-            controls.enableDamping = true;
-            
-            // 燈光設置
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
-            scene.add(ambientLight);
-            
+            scene.add(new THREE.AmbientLight(0xffffff, 0.8));
             const dirLight = new THREE.DirectionalLight(0xffffff, 1);
             dirLight.position.set(100, 100, 100);
             scene.add(dirLight);
 
-            // Rhino Loader 設置
             loader = new Rhino3dmLoader();
             loader.setLibraryPath('https://unpkg.com/rhino3dm@8.0.1/');
 
             window.addEventListener('resize', onWindowResize);
             animate();
+
+            // --- 自動載入邏輯 ---
+            const urlParams = new URLSearchParams(window.location.search);
+            const modelName = urlParams.get('model');
+            if (modelName) {
+                document.getElementById('urlInput').value = modelName;
+                executeLoad(modelName);
+            }
         }
 
-        window.loadModel = function() {
-            let url = document.getElementById('urlInput').value.trim();
+        window.loadModelFromInput = function() {
+            const val = document.getElementById('urlInput').value.trim();
+            if(val) executeLoad(val);
+        }
+
+        function executeLoad(url) {
             const status = document.getElementById('status');
-            
-            if(!url) return alert("請輸入內容");
-
-            // 自動處理 Dropbox / Google Drive 連結轉直連
             if (url.includes('dropbox.com')) url = url.replace('dl=0', 'dl=1');
-            if (url.includes('drive.google.com')) {
-                const fileId = url.match(/\/d\/(.+?)\//);
-                if (fileId) url = `https://drive.google.com/uc?export=download&id=${fileId[1]}`;
-            }
-            
-            // 如果只輸入檔名，補齊相對路徑
-            if (!url.startsWith('http')) {
-                url = './' + url;
-            }
+            if (!url.startsWith('http')) url = './' + url;
 
-            status.innerText = "正在連線並下載檔案...";
-
+            status.innerText = "正在載入模型...";
             loader.load(url, function(object) {
-                // 清除舊物體
                 scene.children = scene.children.filter(c => c.type === 'AmbientLight' || c.type === 'DirectionalLight');
-                
-                // 修正模型方向 (Rhino 是 Z 向上)
                 object.rotation.x = -Math.PI / 2;
                 scene.add(object);
-                
                 status.innerText = "載入成功！";
                 
-                // 相機自動對焦到物體
                 const box = new THREE.Box3().setFromObject(object);
                 const size = box.getSize(new THREE.Vector3()).length();
                 const center = box.getCenter(new THREE.Vector3());
-                
                 controls.target.copy(center);
                 camera.position.set(center.x + size, center.y + size, center.z + size);
                 controls.update();
             }, 
-            (progress) => {
-                if (progress.total > 0) {
-                    status.innerText = `下載進度: ${Math.round(progress.loaded/progress.total*100)}%`;
-                } else {
-                    status.innerText = `正在下載 (${(progress.loaded / 1024 / 1024).toFixed(1)} MB)...`;
-                }
-            },
-            (error) => {
-                console.error(error);
-                status.innerText = "❌ 載入失敗：請確認檔名正確或連結允許跨網域存取。";
-            });
+            (p) => { status.innerText = `下載中: ${Math.round(p.loaded/p.total*100)}%`; },
+            (e) => { status.innerText = "❌ 載入失敗，請檢查檔案是否存在"; }
+            );
         }
 
         function onWindowResize() {
